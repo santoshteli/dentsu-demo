@@ -1,0 +1,62 @@
+#!/bin/bash
+# Bootstraps the Jenkins host: Java, Jenkins, Docker, Git, kubectl, Helm, Terraform.
+# Output goes to /var/log/user-data.log. Completion marker: /var/log/user-data.done
+set -euo pipefail
+exec > >(tee -a /var/log/user-data.log) 2>&1
+
+KUBECTL_VERSION="${kubectl_version}"
+HELM_VERSION="${helm_version}"
+TERRAFORM_VERSION="${terraform_version}"
+
+echo "=== user-data start: $(date -Is) ==="
+
+# Base packages. AL2023 ships the AWS CLI v2 and the SSM agent already.
+dnf -y install git docker unzip jq tar java-21-amazon-corretto-headless
+
+# Docker
+systemctl enable --now docker
+
+# Jenkins LTS from the official repository
+curl -fsSL -o /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+dnf -y install jenkins
+usermod -aG docker jenkins
+systemctl enable --now jenkins
+
+WORKDIR="$(mktemp -d)"
+cd "$WORKDIR"
+
+# kubectl, checksum verified
+curl -fsSLO "https://dl.k8s.io/release/v$${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+curl -fsSLO "https://dl.k8s.io/release/v$${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+install -m 0755 kubectl /usr/local/bin/kubectl
+
+# Helm, checksum verified
+curl -fsSLO "https://get.helm.sh/helm-v$${HELM_VERSION}-linux-amd64.tar.gz"
+curl -fsSLO "https://get.helm.sh/helm-v$${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+sha256sum --check "helm-v$${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+tar -xzf "helm-v$${HELM_VERSION}-linux-amd64.tar.gz"
+install -m 0755 linux-amd64/helm /usr/local/bin/helm
+
+# Terraform, checksum verified
+TF_ZIP="terraform_$${TERRAFORM_VERSION}_linux_amd64.zip"
+curl -fsSLO "https://releases.hashicorp.com/terraform/$${TERRAFORM_VERSION}/$${TF_ZIP}"
+curl -fsSLO "https://releases.hashicorp.com/terraform/$${TERRAFORM_VERSION}/terraform_$${TERRAFORM_VERSION}_SHA256SUMS"
+grep " $${TF_ZIP}\$" "terraform_$${TERRAFORM_VERSION}_SHA256SUMS" | sha256sum --check
+unzip -o "$TF_ZIP" terraform
+install -m 0755 terraform /usr/local/bin/terraform
+
+cd /
+rm -rf "$WORKDIR"
+
+echo "=== installed versions ==="
+java -version
+docker --version
+git --version
+/usr/local/bin/kubectl version --client
+/usr/local/bin/helm version --short
+/usr/local/bin/terraform version
+aws --version
+
+date -Is > /var/log/user-data.done
+echo "=== user-data done: $(date -Is) ==="
