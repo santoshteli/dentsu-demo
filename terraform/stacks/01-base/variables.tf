@@ -4,6 +4,12 @@ variable "project" {
   default     = "dentsu-demo"
 }
 
+variable "environment" {
+  description = "Value of the Env tag on every resource."
+  type        = string
+  default     = "dentsu-demo"
+}
+
 variable "region" {
   description = "AWS region."
   type        = string

@@ -32,6 +32,8 @@ resource "aws_vpc_security_group_egress_rule" "all" {
   description       = "All outbound: SSM, package repos, ECR, EKS API"
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
+
+  tags = merge(var.tags, { Name = "${local.name}-egress-all" })
 }
 
 ################################################################################
@@ -53,14 +55,14 @@ resource "aws_iam_role" "this" {
   name               = local.name
   assume_role_policy = data.aws_iam_policy_document.assume_role.json
 
-  tags = var.tags
+  tags = merge(var.tags, { Name = local.name })
 }
 
 resource "aws_iam_instance_profile" "this" {
   name = local.name
   role = aws_iam_role.this.name
 
-  tags = var.tags
+  tags = merge(var.tags, { Name = local.name })
 }
 
 # Lets Session Manager manage the host, so no SSH key or open port is needed.
