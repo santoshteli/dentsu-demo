@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-10-11 (Phase 2 applied and verified).
+Last updated: 2026-10-11 (Phase 3 applied and verified).
 
 ## Phase status
 
@@ -9,9 +9,9 @@ Last updated: 2026-10-11 (Phase 2 applied and verified).
 | 0 | AWS account, billing alarm, laptop tools, GitHub repo, state bucket, CLAUDE.md | Done by the user. **Public** repo `santoshteli/dentsu-demo` (recreated on 2026-10-11 to drop a commit that contained a plan file; secret scanning and push protection on); state bucket `dentsu-demo-mumbai` (ap-south-1). |
 | 1 | Stack 01-base: vpc, ecr and jenkins-host modules | **Applied and checked.** Jenkins host is Online in SSM; the user confirmed the Jenkins login. **Needs a re-apply** for the Jenkins IAM policy changes listed below. |
 | 2 | Stack 02-eks: eks and nodegroup modules | **Applied through `Jenkinsfile.infra` and verified (2026-10-11).** 1 node Ready on v1.36.4-eks; vpc-cni, kube-proxy and coredns installed; endpoint private only; node instance tagged Name and Env, IMDS hop limit 1. |
-| 3 | Stack 03-addons: alb-controller module | **Code written, not applied (2026-10-11).** `fmt`/`validate` pass; Jenkins role permissions simulated (all allowed). |
-| 4 | Express app and Dockerfile | Not started |
-| 5 | k8s manifests, deployed by hand | Not started |
+| 3 | Stack 03-addons: alb-controller module | **Applied through `Jenkinsfile.infra` and verified (2026-10-11).** Deployment 1/1; Helm release deployed (chart 3.6.0); IngressClass `alb`; pod has `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` (IRSA); 0 permission errors in the logs. |
+| 4 | Express app and Dockerfile | **Done and checked (2026-10-11)** in the separate repo **dentsu-demo-app** (public). Tests pass; image builds, runs as non-root, `/health` and `/users` return 200, SIGTERM exits 0. |
+| 5 | k8s manifests, deployed by hand | Not started. Manifests go in dentsu-demo-app `k8s/`. |
 | 6 | Jenkinsfile and Jenkins setup | App pipeline not started. Jenkins on the rebuilt host is set up (wizard done, suggested plugins). **`Jenkinsfile.infra` written, not yet run.** |
 | 7 | README, teardown, rehearsal | README has the 01-base section only |
 
@@ -86,7 +86,7 @@ Last updated: 2026-10-11 (Phase 2 applied and verified).
   - nodegroup: role, 3 attachments, launch template, node group.
   - 3 add-ons.
 
-### Stack 03-addons (written, not applied)
+### Stack 03-addons (applied and verified)
 
 - `modules/alb-controller`:
   - `iam-policy-v3.6.0.json`: the official policy from the v3.6.0 tag, byte-identical
@@ -108,6 +108,24 @@ Last updated: 2026-10-11 (Phase 2 applied and verified).
 - Expected plan: **4 to add.**
 - `Jenkinsfile.infra` 03 verify stage now fails on AccessDenied, UnauthorizedOperation or
   WebIdentityErr in the controller logs, and prints the deployment and IngressClass.
+
+### Application repo: dentsu-demo-app (Phase 4)
+
+- Separate public repo `santoshteli/dentsu-demo-app`, local folder `../dentsu-demo-app`.
+  `sample-app-1` was reviewed and not reused (plain http on localhost, Node 18, no
+  lock file, root user, a GitHub Actions workflow pushing to Docker Hub and an Argo CD
+  repo, noisy history).
+- Express 5.3.0 (exact); `src/app.js` exports `createApp()`; `src/server.js` listens on
+  `0.0.0.0:3000` (PORT and HOST overridable) and closes cleanly on SIGTERM/SIGINT.
+- `GET /health` returns `{"status":"ok"}`; `GET /users` returns 3 static users.
+- Tests: built-in `node:test` (`npm test` = `node --test "test/**/*.test.js"`; a bare
+  directory argument does not work in Node 24). 3 tests: /health, /users, 404.
+- Dockerfile on `node:24.21.0-alpine3.24`: build stage runs `npm ci` and `npm test`;
+  runtime stage `npm ci --omit=dev`, `NODE_ENV=production`, `USER node`, `EXPOSE 3000`.
+  Image about 63 MB.
+- The laptop builds arm64 images. EKS nodes are x86_64, so images for the cluster must
+  be built on the Jenkins host (x86_64) or with `--platform linux/amd64`.
+- The laptop's Docker uses the legacy builder (no buildx); fine for local checks.
 
 ### Infra pipeline
 
@@ -212,6 +230,7 @@ Last updated: 2026-10-11 (Phase 2 applied and verified).
 | Official IAM policy committed to the repo | Reviewable and fixed to the pinned version, as the assignment asks. Not downloaded at plan time. |
 | `enableServiceMutatorWebhook = false` | The webhook sees every Service creation with failurePolicy Fail; with 1 replica a controller restart would block even ClusterIP Services. Only Ingress is used. |
 | region and vpcId passed to the chart | Required by the assignment, and needed because node IMDS hop limit 1 hides instance metadata from pods. |
+| Separate app repo dentsu-demo-app | Platform and app have different lifecycles and owners; app commits only trigger the app pipeline. The infra README maps every deliverable to its repo, because the assignment says "repo". |
 | `upgrade_policy = STANDARD` | Avoids extended-support pricing ($0.60/hr instead of $0.10/hr). |
 
 ## Next steps

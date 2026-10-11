@@ -16,12 +16,15 @@ steps are in [docs/PROGRESS.md](docs/PROGRESS.md). Read it first.
 
 ## Repository layout
 
+Two repos (decided 2026-10-11). This one is the infra/platform repo. The application
+lives in **../dentsu-demo-app** (github.com/santoshteli/dentsu-demo-app): `src/`, `test/`,
+`Dockerfile`, and later `k8s/` (deployment, service, ingress) and the app `Jenkinsfile`
+(Phase 6). It needs from this repo only: ECR repo `dentsu-demo-app`, cluster
+`dentsu-demo`, region `ap-south-1`.
+
 ```
 terraform/modules/   vpc, ecr, jenkins-host, eks, nodegroup, alb-controller
 terraform/stacks/    01-base, 02-eks, 03-addons   (root configs)
-app/                 Node.js source, tests, Dockerfile
-k8s/                 deployment.yaml, service.yaml, ingress.yaml
-Jenkinsfile          app CI/CD (Phase 6)
 Jenkinsfile.infra    infra pipeline: plan/apply/destroy of 02-eks and 03-addons, with approval
 README.md            user-facing deploy/validate/teardown guide
 docs/PROGRESS.md     status log for working sessions
@@ -92,7 +95,7 @@ kubectl -n kube-system get deploy aws-load-balancer-controller     # after 03, e
 terraform fmt -recursive terraform/ && terraform validate
 ```
 
-**Teardown order:** delete the Ingress first with `kubectl delete -f k8s/ingress.yaml`
+**Teardown order:** delete the Ingress first (`kubectl delete ingress --all -A`; the infra pipeline does this for STACK=all)
 and wait for the ALB to be gone. Then run `terraform destroy` in 03-addons and 02-eks
 (on the host), and finally in 01-base (on the laptop). An orphaned ALB or its security
 groups block VPC deletion.
