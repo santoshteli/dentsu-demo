@@ -148,6 +148,8 @@ pipeline {
         AWS_DEFAULT_REGION = 'ap-south-1'
         CLUSTER_NAME       = 'dentsu-demo'
         TF_IN_AUTOMATION   = 'true'
+        // Versions are pinned on purpose; skip Terraform's "new version" notice.
+        CHECKPOINT_DISABLE = '1'
         KUBECONFIG         = "${WORKSPACE}/.kube/config"
     }
 
