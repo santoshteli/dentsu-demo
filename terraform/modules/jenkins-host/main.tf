@@ -238,10 +238,16 @@ data "aws_iam_policy_document" "terraform" {
     }
   }
 
+  # EKS calls GetRole on its service-linked roles before using them. While a
+  # role does not exist yet, IAM checks the ARN without the aws-service-role/
+  # path, so both forms are needed.
   statement {
-    sid       = "IamReadServiceLinkedRoles"
-    actions   = ["iam:GetRole"]
-    resources = ["arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/*"]
+    sid     = "IamReadServiceLinkedRoles"
+    actions = ["iam:GetRole"]
+    resources = [
+      "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/*",
+      "arn:${local.partition}:iam::${local.account_id}:role/AWSServiceRoleFor*",
+    ]
   }
 
   statement {

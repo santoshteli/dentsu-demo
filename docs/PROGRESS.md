@@ -101,11 +101,18 @@ Last updated: 2026-10-08 (Phase 2 code written).
   allowed. Editing its own role, roles outside the prefix and other buckets were
   denied.
 
+- `Jenkinsfile.infra` runs: plan-only build and approval gate work (2026-10-11).
+- First 02 apply through the pipeline (2026-10-11): cluster ACTIVE in 8m52s; OIDC,
+  access entry, 443 rule, vpc-cni and kube-proxy created. **The node group failed:**
+  EKS calls `iam:GetRole` on `AWSServiceRoleForAmazonEKSNodegroup`, and while that
+  role does not exist IAM checks the ARN *without* the `aws-service-role/` path. The
+  simulator confirmed `role/AWSServiceRoleFor...` was denied and the path form was
+  allowed. Fix: add `role/AWSServiceRoleFor*` to `IamReadServiceLinkedRoles`
+  (01-base re-apply needed). No node group was created, so re-running apply 02 should
+  plan only the node group and CoreDNS.
+
 **Untested:**
-- The stack 02 plan and apply.
-- `Jenkinsfile.infra`: never run, and no Groovy syntax check was possible locally. The
-  first build (default ACTION=plan) is the syntax test. `timestamps()` needs the
-  Timestamper plugin, which is in the suggested set.
+- A complete stack 02 apply, and the node group with the launch template.
 - The IAM additions made after that simulation:
   - `iam:ListRoleTags`, `ListPolicyTags`, `ListOpenIDConnectProviderTags`.
   - `ec2:RunInstances`, `ModifyLaunchTemplate`, `DeleteLaunchTemplateVersions`.
