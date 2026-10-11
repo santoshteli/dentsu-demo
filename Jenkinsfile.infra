@@ -1,0 +1,188 @@
+// Infrastructure pipeline for stacks 02-eks and 03-addons.
+//
+// Runs on the Jenkins host inside the VPC, as the jenkins user, with the host's
+// instance role, so no AWS keys are stored in Jenkins. Stack 01-base is applied
+// from the laptop instead, because it contains this host.
+//
+// Every apply and destroy stops for manual approval of the saved plan, and then
+// applies exactly that plan.
+
+def stackOrder(String stack, String action) {
+    if (stack != 'all') {
+        return [stack]
+    }
+    // Create bottom-up, destroy top-down.
+    return action == 'destroy' ? ['03-addons', '02-eks'] : ['02-eks', '03-addons']
+}
+
+def clusterExists() {
+    return sh(returnStatus: true, script: 'aws eks describe-cluster --name "$CLUSTER_NAME" >/dev/null 2>&1') == 0
+}
+
+def useCluster() {
+    sh '''
+        mkdir -p "$(dirname "$KUBECONFIG")"
+        aws eks update-kubeconfig --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG" >/dev/null
+    '''
+}
+
+// Destroying 02 while the controller still runs would orphan the Helm release
+// and any ALBs it manages, and an orphaned ALB blocks VPC deletion.
+def assertAddonsGone() {
+    if (!clusterExists()) {
+        return
+    }
+    useCluster()
+    def rc = sh(returnStatus: true, script: 'kubectl -n kube-system get deployment aws-load-balancer-controller >/dev/null 2>&1')
+    if (rc == 0) {
+        error('The AWS Load Balancer Controller is still installed. Destroy 03-addons first, or run with STACK=all.')
+    }
+}
+
+def runStack(String stack, String action) {
+    def dirPath = "terraform/stacks/${stack}"
+    def planFile = "plan-${stack}.txt"
+    def destroy = action == 'destroy'
+    def hasChanges = false
+    def summary = ''
+
+    if (!fileExists("${dirPath}/versions.tf")) {
+        error("Stack ${stack} is not written yet.")
+    }
+
+    stage("${stack}: init and validate") {
+        dir(dirPath) {
+            sh 'terraform init -input=false -no-color -backend-config=backend.hcl'
+            sh 'terraform validate -no-color'
+        }
+    }
+
+    if (destroy && stack == '02-eks') {
+        stage('02-eks: pre-destroy check') {
+            assertAddonsGone()
+        }
+    }
+
+    stage("${stack}: plan") {
+        // -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes.
+        def rc = sh(returnStatus: true, script: """
+            cd ${dirPath}
+            terraform plan -input=false -no-color -detailed-exitcode ${destroy ? '-destroy' : ''} -out=tfplan > "\$WORKSPACE/${planFile}" 2>&1
+        """)
+        sh "cat ${planFile}"
+        archiveArtifacts artifacts: planFile
+        if (rc == 1) {
+            error("terraform plan failed for ${stack}")
+        }
+        hasChanges = (rc == 2)
+        summary = sh(returnStdout: true, script: "grep -E '^(Plan:|No changes)' ${planFile} || true").trim()
+    }
+
+    if (action == 'plan') {
+        return
+    }
+
+    if (hasChanges) {
+        stage("${stack}: approve") {
+            timeout(time: 30, unit: 'MINUTES') {
+                input(
+                    message: "${action.toUpperCase()} ${stack}?\n${summary}\nThe full plan is in the build artifacts (${planFile}).",
+                    ok: "Yes, ${action} ${stack}"
+                )
+            }
+        }
+
+        // The controller deletes each Ingress's ALB before removing its
+        // finalizer, so waiting here guarantees no ALB is left behind.
+        if (destroy && stack == '03-addons' && clusterExists()) {
+            stage('03-addons: delete Ingresses') {
+                useCluster()
+                sh 'kubectl delete ingress --all --all-namespaces --wait=true --timeout=10m'
+            }
+        }
+
+        stage("${stack}: ${action}") {
+            timeout(time: 45, unit: 'MINUTES') {
+                dir(dirPath) {
+                    sh 'terraform apply -input=false -no-color tfplan'
+                }
+            }
+        }
+    } else {
+        echo "${stack}: no changes, nothing to ${action}."
+    }
+
+    if (!destroy) {
+        stage("${stack}: verify") {
+            useCluster()
+            if (stack == '02-eks') {
+                sh 'kubectl wait --for=condition=Ready nodes --all --timeout=10m'
+                sh 'kubectl get nodes -o wide && kubectl get pods -n kube-system'
+            } else {
+                sh 'kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=5m'
+            }
+        }
+    }
+}
+
+pipeline {
+    agent any
+
+    parameters {
+        // The first choice is the default. A plan never changes anything, so
+        // the job's first build (which only registers these parameters) is safe.
+        choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'],
+               description: 'plan only shows the changes. apply and destroy stop for approval before changing anything.')
+        choice(name: 'STACK', choices: ['02-eks', '03-addons', 'all'],
+               description: 'all applies 02-eks then 03-addons, and destroys 03-addons then 02-eks.')
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+        AWS_REGION         = 'ap-south-1'
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        CLUSTER_NAME       = 'dentsu-demo'
+        TF_IN_AUTOMATION   = 'true'
+        KUBECONFIG         = "${WORKSPACE}/.kube/config"
+    }
+
+    stages {
+        stage('Check tools and identity') {
+            steps {
+                sh '''
+                    terraform version
+                    kubectl version --client
+                    aws sts get-caller-identity --query Arn --output text
+                '''
+            }
+        }
+
+        stage('Format check') {
+            steps {
+                sh 'terraform fmt -check -recursive -no-color terraform'
+            }
+        }
+
+        stage('Stacks') {
+            steps {
+                script {
+                    for (s in stackOrder(params.STACK, params.ACTION)) {
+                        runStack(s, params.ACTION)
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        cleanup {
+            // A saved plan holds a full state snapshot. Never leave one behind.
+            sh 'rm -f terraform/stacks/*/tfplan'
+        }
+    }
+}

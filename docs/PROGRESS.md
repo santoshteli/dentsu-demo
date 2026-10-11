@@ -6,13 +6,13 @@ Last updated: 2026-10-08 (Phase 2 code written).
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | AWS account, billing alarm, laptop tools, GitHub repo, state bucket, CLAUDE.md | Done by the user. Private repo `santoshteli/dentsu-demo`; state bucket `dentsu-demo-mumbai` (ap-south-1). |
+| 0 | AWS account, billing alarm, laptop tools, GitHub repo, state bucket, CLAUDE.md | Done by the user. **Public** repo `santoshteli/dentsu-demo` (recreated on 2026-10-11 to drop a commit that contained a plan file; secret scanning and push protection on); state bucket `dentsu-demo-mumbai` (ap-south-1). |
 | 1 | Stack 01-base: vpc, ecr and jenkins-host modules | **Applied and checked.** Jenkins host is Online in SSM; the user confirmed the Jenkins login. **Needs a re-apply** for the Jenkins IAM policy changes listed below. |
 | 2 | Stack 02-eks: eks and nodegroup modules | **Code written, not applied.** `fmt` and `validate` pass. |
 | 3 | Stack 03-addons: alb-controller module | Not started |
 | 4 | Express app and Dockerfile | Not started |
 | 5 | k8s manifests, deployed by hand | Not started |
-| 6 | Jenkinsfile and Jenkins setup | Not started. A GitHub fine-grained token (read-only, this repo) is already stored in Jenkins credentials. |
+| 6 | Jenkinsfile and Jenkins setup | App pipeline not started. Jenkins on the rebuilt host is set up (wizard done, suggested plugins). **`Jenkinsfile.infra` written, not yet run.** |
 | 7 | README, teardown, rehearsal | README has the 01-base section only |
 
 ## What exists
@@ -73,6 +73,21 @@ Last updated: 2026-10-08 (Phase 2 code written).
   - nodegroup: role, 3 attachments, launch template, node group.
   - 3 add-ons.
 
+### Infra pipeline (written, not run)
+
+- `Jenkinsfile.infra`, used by a Jenkins Pipeline job `dentsu-infra` that reads it from SCM.
+- Parameters: `ACTION` (plan, apply, destroy; plan is the default) and `STACK`
+  (02-eks, 03-addons, all). `all` applies 02 then 03, and destroys 03 then 02.
+- Per stack: init and validate, plan (`-detailed-exitcode`, saved as a build
+  artifact), manual approval showing the plan summary, apply of the saved plan, then
+  verify (nodes Ready for 02, controller rollout for 03).
+- Before destroying 03, it deletes all Ingresses and waits, so the controller removes
+  the ALBs. Before destroying 02, it refuses if the controller is still installed.
+- No triggers; one build at a time; 30-minute approval timeout; 45-minute apply
+  timeout; plan files are deleted after each build. It runs as the `jenkins` user with
+  the instance role, so no stored keys.
+- 01-base is never run here, because it contains the Jenkins host.
+
 ## Tested vs untested
 
 **Tested:**
@@ -88,6 +103,9 @@ Last updated: 2026-10-08 (Phase 2 code written).
 
 **Untested:**
 - The stack 02 plan and apply.
+- `Jenkinsfile.infra`: never run, and no Groovy syntax check was possible locally. The
+  first build (default ACTION=plan) is the syntax test. `timestamps()` needs the
+  Timestamper plugin, which is in the suggested set.
 - The IAM additions made after that simulation:
   - `iam:ListRoleTags`, `ListPolicyTags`, `ListOpenIDConnectProviderTags`.
   - `ec2:RunInstances`, `ModifyLaunchTemplate`, `DeleteLaunchTemplateVersions`.
@@ -115,8 +133,8 @@ Last updated: 2026-10-08 (Phase 2 code written).
 6. **`bootstrap_self_managed_addons = false` is fixed at creation.** Changing it later
    replaces the cluster.
 7. **Node.js is not on the host.** Phase 6 should run npm inside a `node` container.
-8. **Cloning on the host:** the repo is private. Use the GitHub username and the
-   fine-grained token as the password. Do not put the token in the clone URL.
+8. **Never commit plan or state files.** `.gitignore` covers `tfplan*`, `*.tfplan` and
+   `*.tfstate*`. A plan file was committed once and removed by recreating the repo.
 
 ## Key decisions and why
 
@@ -140,6 +158,7 @@ Last updated: 2026-10-08 (Phase 2 code written).
 | Launch template for the nodes | The only way to tag node EC2 instances (Name, Env). Also gives an encrypted disk and IMDSv2. EKS requires the caller to have `ec2:RunInstances` for this. |
 | CNI policy on the node role, not IRSA | Simpler for one node. The production answer is IRSA or Pod Identity for vpc-cni. |
 | OIDC provider without a thumbprint | AWS verifies EKS issuers against its own CAs. Avoids the `tls` provider. |
+| Infra pipeline for 02 and 03 only, with an approval gate | Repeatable destroy and rebuild for rehearsals, and a demo of IaC through CI. 01-base stays on the laptop because the pipeline runs on the host it creates. |
 | `upgrade_policy = STANDARD` | Avoids extended-support pricing ($0.60/hr instead of $0.10/hr). |
 
 ## Next steps
@@ -147,7 +166,7 @@ Last updated: 2026-10-08 (Phase 2 code written).
 1. **Laptop:** commit and push. Then re-apply 01-base:
    `terraform plan -out tfplan`, expecting 1 in-place update of
    `module.jenkins_host.aws_iam_role_policy.terraform`; then `terraform apply tfplan`.
-2. **Jenkins host (SSM shell):** `sudo su - ec2-user`, clone the repo, then:
+2. **Jenkins host (SSM shell):** `sudo su - ec2-user`, clone the repo (public, no token needed), then:
    ```bash
    cd dentsu-demo/terraform/stacks/02-eks
    terraform init -backend-config=backend.hcl

@@ -21,7 +21,8 @@ terraform/modules/   vpc, ecr, jenkins-host, eks, nodegroup, alb-controller
 terraform/stacks/    01-base, 02-eks, 03-addons   (root configs)
 app/                 Node.js source, tests, Dockerfile
 k8s/                 deployment.yaml, service.yaml, ingress.yaml
-Jenkinsfile
+Jenkinsfile          app CI/CD (Phase 6)
+Jenkinsfile.infra    infra pipeline: plan/apply/destroy of 02-eks and 03-addons, with approval
 README.md            user-facing deploy/validate/teardown guide
 docs/PROGRESS.md     status log for working sessions
 ```
@@ -79,6 +80,10 @@ terraform plan -out tfplan && terraform apply tfplan
 aws eks update-kubeconfig --region ap-south-1 --name dentsu-demo   # after 02
 kubectl get nodes                                                  # expect 1 Ready
 kubectl -n kube-system get deploy aws-load-balancer-controller     # after 03, expect 1/1
+
+# Or from Jenkins: job dentsu-infra (Jenkinsfile.infra), Build with Parameters
+#   ACTION=plan|apply|destroy, STACK=02-eks|03-addons|all
+#   all = apply 02 then 03, destroy 03 then 02 (Ingresses deleted first). 01-base never runs here.
 
 # Static checks (any stack)
 terraform fmt -recursive terraform/ && terraform validate
