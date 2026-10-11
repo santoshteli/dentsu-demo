@@ -72,7 +72,7 @@ terraform plan -out tfplan && terraform apply tfplan
 $(terraform output -raw ssm_shell_command)                 # shell on the host
 $(terraform output -raw ssm_jenkins_port_forward_command)  # Jenkins on localhost:8080
 
-# 02-eks and 03-addons (on the Jenkins host, after cloning the repo). Not written yet.
+# 02-eks and 03-addons (on the Jenkins host as ec2-user, after cloning). 03 is not written yet.
 cd terraform/stacks/02-eks      # then 03-addons
 terraform init -backend-config=backend.hcl
 terraform plan -out tfplan && terraform apply tfplan

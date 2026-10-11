@@ -1,140 +1,170 @@
 # Progress
 
-Last updated: 2026-10-04 (end of the Phase 1 session).
+Last updated: 2026-10-08 (Phase 2 code written).
 
 ## Phase status
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | AWS account, billing alarm, laptop tools, GitHub repo, state bucket, CLAUDE.md | **User owns.** CLAUDE.md is done. Other items not confirmed. |
-| 1 | Stack 01-base: vpc, ecr and jenkins-host modules | **Code written, not applied** |
-| 2 | Stack 02-eks: eks and nodegroup modules | Not started |
+| 0 | AWS account, billing alarm, laptop tools, GitHub repo, state bucket, CLAUDE.md | Done by the user. Private repo `santoshteli/dentsu-demo`; state bucket `dentsu-demo-mumbai` (ap-south-1). |
+| 1 | Stack 01-base: vpc, ecr and jenkins-host modules | **Applied and checked.** Jenkins host is Online in SSM; the user confirmed the Jenkins login. **Needs a re-apply** for the Jenkins IAM policy changes listed below. |
+| 2 | Stack 02-eks: eks and nodegroup modules | **Code written, not applied.** `fmt` and `validate` pass. |
 | 3 | Stack 03-addons: alb-controller module | Not started |
 | 4 | Express app and Dockerfile | Not started |
 | 5 | k8s manifests, deployed by hand | Not started |
-| 6 | Jenkinsfile and Jenkins setup | Not started |
+| 6 | Jenkinsfile and Jenkins setup | Not started. A GitHub fine-grained token (read-only, this repo) is already stored in Jenkins credentials. |
 | 7 | README, teardown, rehearsal | README has the 01-base section only |
 
 ## What exists
 
-- `terraform/modules/vpc`: VPC (10.0.0.0/16, DNS on), IGW, public subnets
-  10.0.0.0/24 and 10.0.1.0/24 tagged `kubernetes.io/role/elb=1`, private subnets
-  10.0.16.0/20 and 10.0.32.0/20 tagged `kubernetes.io/role/internal-elb=1`, one EIP
-  with a NAT gateway in public[0], and public and private route tables.
-  The `private_subnet_ids` output has `depends_on` on the NAT route, so consumers
-  wait until the subnets have egress.
-- `terraform/modules/ecr`: repository `dentsu-demo-app`. IMMUTABLE tags, scan on push,
-  AES256 encryption, `force_delete = true`, lifecycle rule that keeps the last 10 images.
-- `terraform/modules/jenkins-host`: the host instance.
-  - Instance: AL2023 (from the SSM parameter, `ignore_changes = [ami]`), t3.medium in
-    private[0], no public IP, no key pair, IMDSv2 with hop limit 1, 30 GB gp3
-    encrypted disk, `user_data_replace_on_change = true`.
+### Stack 01-base (applied)
+
+- `modules/vpc`: VPC 10.0.0.0/16 with DNS on, IGW.
+  - Public subnets 10.0.0.0/24 and 10.0.1.0/24, tagged `kubernetes.io/role/elb=1`.
+  - Private subnets 10.0.16.0/20 and 10.0.32.0/20, tagged `kubernetes.io/role/internal-elb=1`.
+  - One NAT gateway in public[0]. The `private_subnet_ids` output depends on the NAT
+    route, so consumers wait until the subnets have egress.
+- `modules/ecr`: repository `dentsu-demo-app`. IMMUTABLE tags, scan on push,
+  `force_delete`, lifecycle rule keeping the last 10 images.
+- `modules/jenkins-host`: AL2023 t3.medium in private[0].
+  - Instance: no public IP, no SSH key, IMDSv2 with hop limit 1, 30 GB encrypted gp3.
   - Security group: no inbound rules, all outbound.
-  - Role `dentsu-demo-jenkins` has three parts:
+  - Role `dentsu-demo-jenkins`:
     - `AmazonSSMManagedInstanceCore`.
-    - Inline `ecr-push`, scoped to the repo.
-    - Inline `terraform-stacks-02-03`: state bucket R/W, `eks:*`, EC2 SG/LT/describe,
-      IAM role and policy management under `dentsu-demo-*`, OIDC providers for
-      `oidc.eks.ap-south-1.amazonaws.com/*`, service-linked roles for eks,
-      eks-nodegroup and autoscaling, the SSM `/aws/service/eks/*` parameters,
-      CloudWatch log groups `/aws/eks/dentsu-demo-*`, and an explicit Deny of `iam:*`
-      on its own role.
-  - User data (`templates/user-data.sh.tftpl`) installs Java 21 Corretto, Jenkins LTS
-    (official repo), Docker, Git, jq, unzip, kubectl 1.36.5, Helm 3.22.0 and Terraform
-    1.16.4, with checksums verified. It also adds `jenkins` to the `docker` group.
-    Log: `/var/log/user-data.log`. Completion marker: `/var/log/user-data.done`.
-- `terraform/stacks/01-base`: wires the three modules together.
-  - Outputs: vpc/subnet IDs, ECR URL, Jenkins instance ID, SG ID, role ARN, and the
-    SSM shell and port-forward commands.
-  - `backend.hcl` and `terraform.tfvars` hold the placeholder
-    `REPLACE_WITH_STATE_BUCKET`. A variable validation rejects the placeholder.
-- Empty placeholder dirs (`.gitkeep`): modules eks, nodegroup, alb-controller; stacks
-  02-eks, 03-addons; app; k8s.
-- `.gitignore`: covers Terraform state, plans, `.terraform/` and `node_modules`.
-  `.terraform.lock.hcl` **is committed**.
+    - Inline `ecr-push`, scoped to the repository.
+    - Inline `terraform-stacks-02-03`: state bucket, `eks:*`, EC2 describe, security
+      groups, launch templates and `RunInstances`, IAM roles and policies under
+      `dentsu-demo-*`, the EKS OIDC provider, EKS service-linked roles, and an explicit
+      Deny of `iam:*` on its own role.
+  - User data installs Java 21, Jenkins LTS, Docker, Git, kubectl 1.36.5, Helm 3.22.0
+    and Terraform 1.16.4, with checksums verified, and adds `jenkins` to the `docker`
+    group.
+- Tags on every taggable resource: `Name`, `Env=dentsu-demo`, `Project`, `ManagedBy`,
+  `Stack`.
+
+### Stack 02-eks (written, not applied)
+
+- `modules/eks`:
+  - IAM role `dentsu-demo-eks-cluster` with `AmazonEKSClusterPolicy`.
+  - `aws_eks_cluster` `dentsu-demo`: version 1.36, private endpoint only,
+    `authentication_mode = "API"`, `bootstrap_cluster_creator_admin_permissions = false`,
+    `bootstrap_self_managed_addons = false`, `upgrade_policy = STANDARD`.
+  - An SG rule allowing 443 from the Jenkins SG into the cluster SG.
+  - An access entry with `AmazonEKSClusterAdminPolicy` for each admin principal.
+  - An IAM OIDC provider (no thumbprint).
+- `modules/nodegroup`:
+  - IAM role `dentsu-demo-eks-node` with WorkerNode, CNI and ECR PullOnly policies.
+  - Launch template `dentsu-demo-eks-node`: 20 GB encrypted gp3 disk, IMDSv2 with hop
+    limit 1, and tag specifications for the instance, volume and ENI (copied from the
+    provider's default tags through the `aws_default_tags` data source). No AMI ID, so
+    EKS picks the AMI from `ami_type` and merges its bootstrap.
+  - Node group `dentsu-demo-ng`: `AL2023_x86_64_STANDARD`, ON_DEMAND, t3.medium,
+    1/1/1, both private subnets.
+- `stacks/02-eks`:
+  - `data.tf` reads the 01-base outputs with `terraform_remote_state`.
+  - `main.tf` calls the two modules. Admins are the Jenkins role plus
+    `var.additional_admin_principal_arns`, which is empty by default.
+  - `addons.tf`: vpc-cni `v1.22.4-eksbuild.3` and kube-proxy `v1.36.0-eksbuild.25`
+    are created before the node group; coredns `v1.14.6-eksbuild.4` after it. These
+    are the AWS default versions for 1.36 as of 2026-10-08.
+  - The lock file has darwin_arm64 and linux_amd64 hashes.
+- Expected plan: **16 to add.**
+  - eks: role, attachment, cluster, SG rule, access entry, policy association, OIDC.
+  - nodegroup: role, 3 attachments, launch template, node group.
+  - 3 add-ons.
 
 ## Tested vs untested
 
-**Tested (static only):**
-- `terraform fmt -recursive -check` is clean.
-- `terraform validate` passes on 01-base (run with `init -backend=false`).
-- The rendered user-data script passes `bash -n`.
-- All pinned download URLs return 200: kubectl `.sha256`, Helm `.sha256sum`,
-  Terraform `SHA256SUMS`, the Jenkins repo file.
+**Tested:**
+- Stack 01 apply, SSM session and Jenkins login.
+- `fmt` and `validate` on all stacks.
+- The managed policies and the EKS access policy referenced in the code exist.
+- The add-on versions exist for 1.36 in ap-south-1.
+- On 2026-10-08, the live Jenkins role was checked with `aws iam
+  simulate-principal-policy`. The state bucket, EKS create/update/delete, SG rules,
+  IAM under `dentsu-demo-*`, PassRole, OIDC, service-linked roles and ECR push were all
+  allowed. Editing its own role, roles outside the prefix and other buckets were
+  denied.
 
-**Untested (nothing has been applied):**
-- `terraform plan` and `apply` against AWS.
-- User data running on a real AL2023 instance: package names, the Jenkins repo GPG
-  key import, service start.
-- SSM session and port-forward to 8080, and Jenkins login.
-- Whether the `terraform-stacks-02-03` IAM policy is enough for stacks 02 and 03.
-  It was written from knowledge, not verified. Expect to add missing actions when
-  02 and 03 first run.
+**Untested:**
+- The stack 02 plan and apply.
+- The IAM additions made after that simulation:
+  - `iam:ListRoleTags`, `ListPolicyTags`, `ListOpenIDConnectProviderTags`.
+  - `ec2:RunInstances`, `ModifyLaunchTemplate`, `DeleteLaunchTemplateVersions`.
+
+  They are not live until 01-base is re-applied.
+- Whether IMDS hop limit 1 on the nodes breaks anything. Nothing in this stack needs
+  IMDS from a pod. The ALB controller in Phase 3 must be given `region` and `vpcId`
+  explicitly, or it will try IMDS and fail.
 
 ## Known issues and risks
 
-1. **Placeholders:** the state bucket name must be set in `01-base/backend.hcl` and
-   `terraform.tfvars`.
-2. **AWS CLI is missing on the laptop** (`aws not found` at the time of writing).
-   It is needed for the SSM check.
-3. **Re-pushing a tag fails:** ECR tags are IMMUTABLE, so pushing the same git-SHA tag
-   twice fails. The Phase 6 Jenkinsfile must skip the push when the tag exists, or
-   fail clearly.
-4. **Changing user data replaces the host,** because `user_data_replace_on_change` is
-   on. Jenkins configuration (jobs, plugins, credentials) is lost.
-5. **Privilege escalation is possible:** the host role can create a `dentsu-demo-*`
-   role with broad permissions. Accepted for the demo. The production answer is a
-   permissions boundary or a separate deploy role or account.
-6. **Lock file covers one platform:** `01-base/.terraform.lock.hcl` has darwin_arm64
-   hashes only. That is fine because 01 runs only from the laptop. For the 02/03
-   stacks, run `terraform providers lock -platform=linux_amd64 -platform=darwin_arm64`,
-   or let the host create the lock file and commit it.
-7. **Node.js is not on the host.** Phase 6 should run `npm ci` and `npm test` inside a
-   `node` container, not install Node on the host.
-8. **Nothing is committed to git yet.**
+1. **01-base must be re-applied before 02.** The Jenkins role policy changed; the plan
+   should show 1 in-place update. Without it, the node group fails because EKS requires
+   the caller to have `ec2:RunInstances` when the launch template tags instances.
+2. **Re-pushing a tag fails:** ECR tags are IMMUTABLE. The Phase 6 Jenkinsfile must skip
+   the push when the tag already exists.
+3. **Changing the Jenkins user data replaces the host,** and Jenkins configuration is
+   lost.
+4. **Privilege escalation is limited but possible.** The Jenkins role can create a
+   broad `dentsu-demo-*` role, but it cannot create instance profiles or pass its own
+   role, so `RunInstances` only reaches the node role. The production answer is a
+   permissions boundary or a separate deploy role.
+5. **A node group with 1/1/1 and `max_unavailable = 1`:** node updates take the only
+   node down briefly. Acceptable for the demo.
+6. **`bootstrap_self_managed_addons = false` is fixed at creation.** Changing it later
+   replaces the cluster.
+7. **Node.js is not on the host.** Phase 6 should run npm inside a `node` container.
+8. **Cloning on the host:** the repo is private. Use the GitHub username and the
+   fine-grained token as the password. Do not put the token in the clone URL.
 
 ## Key decisions and why
 
 | Decision | Reason |
 |---|---|
-| Three stacks, 02 and 03 run from the Jenkins host | The private endpoint is only reachable from inside the VPC, including for the Helm provider. |
-| SSM Session Manager, no SSH, no inbound SG rules | No keys and no open ports. Access is audited through IAM. |
+| Three stacks; 02 and 03 run from the Jenkins host | The private endpoint is only reachable inside the VPC, including for the Helm provider. |
+| SSM Session Manager, no SSH, no inbound SG rules | No keys and no open ports; access is audited through IAM. |
 | Single NAT, no VPC endpoints | Cost. The HA answer is one NAT per AZ plus interface endpoints. |
-| /20 private subnets | The VPC CNI assigns a VPC IP to every pod. |
-| `internal-elb` tag on private subnets | Lets internal ALBs work later at no cost. |
-| No `kubernetes.io/cluster/<name>` subnet tag | The LBC no longer needs it for subnet discovery. |
-| IMMUTABLE ECR tags, keyed by git SHA | Every deployment is traceable, and rollback means redeploying an old SHA. |
-| IMDSv2, hop limit 1 | Build containers cannot steal the host's instance-profile credentials. |
-| IAM scoped by the `dentsu-demo-*` name prefix, Deny on own role | Least privilege without listing every role ARN in advance. |
-| Inline policies on the Jenkins role | They live and die with the role, and fit the size limit. |
-| AMI from SSM, `ignore_changes = [ami]` | Always launches the latest AL2023, but a new AMI does not replace a running host. |
-| S3 native locking (`use_lockfile`) | No DynamoDB table needed (Terraform ≥ 1.10). |
-| State bucket `dentsu-demo-mumbai` in ap-south-1, key `<stack>/terraform.tfstate` | Same region as the resources. One bucket for all three stacks. Created by hand, with versioning on and public access blocked. |
-| Checksum-verified tool downloads | Supply-chain hygiene, and exact pinned versions. |
-| Helm 3.22 (not 4.x) on the host | Matches what the Terraform Helm provider uses, and the chart docs assume v3. |
+| /20 private subnets | The VPC CNI gives every pod a VPC IP. |
+| IMMUTABLE ECR tags keyed by git SHA | Traceable deployments; rollback means redeploying an old SHA. |
+| IMDSv2 with hop limit 1 (Jenkins host and nodes) | Containers and pods cannot read the instance role's credentials. Pods use IRSA. |
+| IAM scoped by the `dentsu-demo-*` prefix, Deny on own role | Least privilege without listing every ARN in advance. |
+| S3 native locking, state bucket `dentsu-demo-mumbai`, key `<stack>/terraform.tfstate` | No DynamoDB table; same region as the resources. |
+| Checksum-verified, pinned tool downloads | Supply-chain hygiene. |
+| Helm 3.22 on the host | Matches the Terraform Helm provider and the chart docs. |
+| Admin through an explicit access entry, `bootstrap_cluster_creator_admin_permissions = false` | Visible and auditable in code. With `true`, EKS would create a hidden entry for the creator that conflicts with the declared one. |
+| Only the Jenkins role is a cluster admin | The user chose to do all kubectl work from the Jenkins host. `additional_admin_principal_arns` exists for adding a console user later. |
+| `bootstrap_self_managed_addons = false`, all three add-ons managed by EKS | Terraform owns the add-on versions. No unmanaged copies. |
+| Add-on order: vpc-cni and kube-proxy, then nodes, then CoreDNS | Nodes need the CNI to be Ready; CoreDNS needs a node to run on. |
+| Add-ons in the stack's `addons.tf`, not a module | Their order spans both modules. The one exception to "stacks only call modules". |
+| Launch template for the nodes | The only way to tag node EC2 instances (Name, Env). Also gives an encrypted disk and IMDSv2. EKS requires the caller to have `ec2:RunInstances` for this. |
+| CNI policy on the node role, not IRSA | Simpler for one node. The production answer is IRSA or Pod Identity for vpc-cni. |
+| OIDC provider without a thumbprint | AWS verifies EKS issuers against its own CAs. Avoids the `tls` provider. |
+| `upgrade_policy = STANDARD` | Avoids extended-support pricing ($0.60/hr instead of $0.10/hr). |
 
 ## Next steps
 
-1. **User:** finish Phase 0. Install the AWS CLI v2 and the Session Manager plugin,
-   create the state bucket in ap-south-1 (versioning on, public access blocked), set
-   the billing alarm, push the repo to GitHub.
-2. **User:** put the bucket name in `terraform/stacks/01-base/backend.hcl` and
-   `terraform.tfvars`.
-3. **User:** `terraform init -backend-config=backend.hcl`, `terraform plan -out tfplan`,
-   review the plan (26 resources to add: 16 vpc, 2 ecr, 8 jenkins-host), `terraform apply tfplan`.
-4. **Phase 1 check:** after about 5 minutes, open an SSM shell, confirm
-   `/var/log/user-data.done` exists, read the initial admin password, port-forward
-   8080, and log in to Jenkins. Fix user data if anything failed. The log is at
-   `/var/log/user-data.log`.
-5. **Next session, Phase 2:** plan, then write the `eks` and `nodegroup` modules and
-   the `02-eks` stack.
-   - EKS 1.36, private endpoint only, `authentication_mode = "API"`.
-   - Cluster and node roles named `dentsu-demo-*`.
-   - SG rule allowing 443 from the Jenkins SG to the cluster SG.
-   - Access entry plus `AmazonEKSClusterAdminPolicy` for the Jenkins role. Or rely on
-     `bootstrap_cluster_creator_admin_permissions`, since the host creates the cluster.
-     Pick one.
-   - OIDC provider.
-   - Add-ons vpc-cni, kube-proxy and coredns, with coredns depending on the node group.
-   - Remote state from `01-base`.
-   - Its own `backend.hcl`.
+1. **Laptop:** commit and push. Then re-apply 01-base:
+   `terraform plan -out tfplan`, expecting 1 in-place update of
+   `module.jenkins_host.aws_iam_role_policy.terraform`; then `terraform apply tfplan`.
+2. **Jenkins host (SSM shell):** `sudo su - ec2-user`, clone the repo, then:
+   ```bash
+   cd dentsu-demo/terraform/stacks/02-eks
+   terraform init -backend-config=backend.hcl
+   terraform plan -out tfplan    # expect 16 to add
+   terraform apply tfplan        # about 15–20 minutes
+   ```
+3. **Phase 2 check:**
+   ```bash
+   $(terraform output -raw update_kubeconfig_command)
+   kubectl get nodes               # 1 node Ready, v1.36.x
+   kubectl get pods -n kube-system # aws-node, kube-proxy, 2 coredns Running
+   ```
+   Also confirm the node EC2 instance has the `Name` and `Env` tags.
+4. **Next session, Phase 3:** the `alb-controller` module and the `03-addons` stack.
+   - The official `iam_policy.json` for the pinned controller version.
+   - An IRSA role scoped to `system:serviceaccount:kube-system:aws-load-balancer-controller`,
+     using `oidc_provider_arn` and `oidc_issuer` from 02-eks.
+   - `helm_release` with `clusterName`, `region`, `vpcId`, the role annotation and
+     `replicaCount = 1`.
+   - The Helm provider authenticates with `aws eks get-token` from the host.
