@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-10-08 (Phase 2 code written).
+Last updated: 2026-10-11 (Phase 2 applied and verified).
 
 ## Phase status
 
@@ -8,8 +8,8 @@ Last updated: 2026-10-08 (Phase 2 code written).
 |---|---|---|
 | 0 | AWS account, billing alarm, laptop tools, GitHub repo, state bucket, CLAUDE.md | Done by the user. **Public** repo `santoshteli/dentsu-demo` (recreated on 2026-10-11 to drop a commit that contained a plan file; secret scanning and push protection on); state bucket `dentsu-demo-mumbai` (ap-south-1). |
 | 1 | Stack 01-base: vpc, ecr and jenkins-host modules | **Applied and checked.** Jenkins host is Online in SSM; the user confirmed the Jenkins login. **Needs a re-apply** for the Jenkins IAM policy changes listed below. |
-| 2 | Stack 02-eks: eks and nodegroup modules | **Code written, not applied.** `fmt` and `validate` pass. |
-| 3 | Stack 03-addons: alb-controller module | Not started |
+| 2 | Stack 02-eks: eks and nodegroup modules | **Applied through `Jenkinsfile.infra` and verified (2026-10-11).** 1 node Ready on v1.36.4-eks; vpc-cni, kube-proxy and coredns installed; endpoint private only; node instance tagged Name and Env, IMDS hop limit 1. |
+| 3 | Stack 03-addons: alb-controller module | **Code written, not applied (2026-10-11).** `fmt`/`validate` pass; Jenkins role permissions simulated (all allowed). |
 | 4 | Express app and Dockerfile | Not started |
 | 5 | k8s manifests, deployed by hand | Not started |
 | 6 | Jenkinsfile and Jenkins setup | App pipeline not started. Jenkins on the rebuilt host is set up (wizard done, suggested plugins). **`Jenkinsfile.infra` written, not yet run.** |
@@ -41,6 +41,19 @@ Last updated: 2026-10-08 (Phase 2 code written).
     group.
 - Tags on every taggable resource: `Name`, `Env=dentsu-demo`, `Project`, `ManagedBy`,
   `Stack`.
+- **Jenkins ALB (applied and tested 2026-10-11:** target healthy, HTTP 200 from the
+  user's IP after adding a console rule) in `modules/jenkins-host/alb.tf`,
+  switched on by `enable_jenkins_alb` (default true):
+  - Internet-facing ALB `dentsu-demo-jenkins-alb` in the public subnets, HTTP :80 to a
+    target group on the host's port 8080 (health check `/login`).
+  - ALB security group `dentsu-demo-jenkins-alb`: **no inbound rule by default**. Add
+    HTTP from "My IP" in the console when needed; `jenkins_alb_allowed_cidrs` exists but
+    stays empty in git. Egress only to the Jenkins SG on 8080.
+  - The host SG gains one rule: 8080 from the ALB SG. The host stays in the private
+    subnet with no public IP and is not replaced.
+  - Outputs `jenkins_url` and `jenkins_alb_security_group_id`. Expected plan: 7 to add.
+  - Reason: the demo runs on a Dentsu Windows machine with only a browser, so no
+    AWS CLI or SSM port-forward. The shell comes from the console's Session Manager.
 
 ### Stack 02-eks (written, not applied)
 
@@ -73,7 +86,30 @@ Last updated: 2026-10-08 (Phase 2 code written).
   - nodegroup: role, 3 attachments, launch template, node group.
   - 3 add-ons.
 
-### Infra pipeline (written, not run)
+### Stack 03-addons (written, not applied)
+
+- `modules/alb-controller`:
+  - `iam-policy-v3.6.0.json`: the official policy from the v3.6.0 tag, byte-identical
+    (sha256 16f232c9…). The file name carries the version; `controller_version` picks it,
+    so a version bump without a new policy file fails at plan time.
+  - `aws_iam_policy` and `aws_iam_role` `dentsu-demo-alb-controller`. IRSA trust:
+    `sts:AssumeRoleWithWebIdentity` from the cluster OIDC provider, conditions `sub` =
+    `system:serviceaccount:kube-system:aws-load-balancer-controller` and `aud` =
+    `sts.amazonaws.com`.
+  - `helm_release` `aws-load-balancer-controller`, chart 3.6.0 from
+    `https://aws.github.io/eks-charts`, in kube-system, `wait = true`. Values:
+    clusterName, region, vpcId, replicaCount 1, service account (named, with the role
+    annotation), `defaultTags` (Env, Project, ManagedBy) for the ALBs it creates,
+    `enableServiceMutatorWebhook = false`.
+- `stacks/03-addons`: AWS 6.67.0 and Helm 3.3.0 providers (lock file for darwin_arm64
+  and linux_amd64). The Helm provider uses the 02-eks endpoint and CA and
+  `aws eks get-token`, so it must run on the Jenkins host. Reads 01-base (vpc_id) and
+  02-eks (cluster, OIDC) from remote state.
+- Expected plan: **4 to add.**
+- `Jenkinsfile.infra` 03 verify stage now fails on AccessDenied, UnauthorizedOperation or
+  WebIdentityErr in the controller logs, and prints the deployment and IngressClass.
+
+### Infra pipeline
 
 - `Jenkinsfile.infra`, used by a Jenkins Pipeline job `dentsu-infra` that reads it from SCM.
 - Parameters: `ACTION` (plan, apply, destroy; plan is the default) and `STACK`
@@ -111,8 +147,12 @@ Last updated: 2026-10-08 (Phase 2 code written).
   (01-base re-apply needed). No node group was created, so re-running apply 02 should
   plan only the node group and CoreDNS.
 
+- Re-run after the fix: node group and CoreDNS created; `kubectl get nodes` from the host
+  shows 1 node Ready. kubectl in a shell needs `aws eks update-kubeconfig` per Linux user;
+  without it kubectl falls back to localhost:8080, which is Jenkins.
+
 **Untested:**
-- A complete stack 02 apply, and the node group with the launch template.
+- Destroying 02-eks through the pipeline, and a timed rebuild.
 - The IAM additions made after that simulation:
   - `iam:ListRoleTags`, `ListPolicyTags`, `ListOpenIDConnectProviderTags`.
   - `ec2:RunInstances`, `ModifyLaunchTemplate`, `DeleteLaunchTemplateVersions`.
@@ -166,6 +206,12 @@ Last updated: 2026-10-08 (Phase 2 code written).
 | CNI policy on the node role, not IRSA | Simpler for one node. The production answer is IRSA or Pod Identity for vpc-cni. |
 | OIDC provider without a thumbprint | AWS verifies EKS issuers against its own CAs. Avoids the `tls` provider. |
 | Infra pipeline for 02 and 03 only, with an approval gate | Repeatable destroy and rebuild for rehearsals, and a demo of IaC through CI. 01-base stays on the laptop because the pipeline runs on the host it creates. |
+| Jenkins behind its own ALB, not a public IP on the host | Browser-only demo machine. Host stays private and is not rebuilt. Plain HTTP (no domain), limited to the client IP added in the console. |
+| Separate ALBs for Jenkins and the app | Jenkins must be reachable before the cluster and controller exist, and during teardown after Ingresses are deleted. The app ALB is created by the controller from the Ingress, as the assignment requires. |
+| Load Balancer Controller v3.6.0 | Latest; same IAM policy as v3.5.0; fixes an SG reconciliation bug for ALB Ingresses. Gateway API "action required" notes don't apply (Ingress only). |
+| Official IAM policy committed to the repo | Reviewable and fixed to the pinned version, as the assignment asks. Not downloaded at plan time. |
+| `enableServiceMutatorWebhook = false` | The webhook sees every Service creation with failurePolicy Fail; with 1 replica a controller restart would block even ClusterIP Services. Only Ingress is used. |
+| region and vpcId passed to the chart | Required by the assignment, and needed because node IMDS hop limit 1 hides instance metadata from pods. |
 | `upgrade_policy = STANDARD` | Avoids extended-support pricing ($0.60/hr instead of $0.10/hr). |
 
 ## Next steps

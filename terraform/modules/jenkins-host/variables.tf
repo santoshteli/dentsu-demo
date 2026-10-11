@@ -55,3 +55,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_public_alb" {
+  description = "Create an internet-facing ALB in front of Jenkins (see alb.tf). The host stays private."
+  type        = bool
+  default     = false
+}
+
+variable "public_subnet_ids" {
+  description = "Public subnets for the Jenkins ALB, in at least two AZs. Required when enable_public_alb is true."
+  type        = list(string)
+  default     = []
+}
+
+variable "alb_allowed_cidrs" {
+  description = "Client CIDRs allowed to reach the Jenkins ALB on port 80, for example [\"203.0.113.10/32\"]. Empty means no inbound rule; add one in the console when needed."
+  type        = list(string)
+  default     = []
+}

@@ -120,6 +120,15 @@ def runStack(String stack, String action) {
                 sh 'kubectl get nodes -o wide && kubectl get pods -n kube-system'
             } else {
                 sh 'kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=5m'
+                // Phase 3 check: the controller can call AWS through IRSA.
+                sh '''
+                    if kubectl -n kube-system logs deployment/aws-load-balancer-controller --tail=500 | grep -iE 'AccessDenied|UnauthorizedOperation|WebIdentityErr'; then
+                        echo "Permission errors found in the controller logs."
+                        exit 1
+                    fi
+                    kubectl -n kube-system get deployment aws-load-balancer-controller
+                    kubectl get ingressclass alb
+                '''
             }
         }
     }

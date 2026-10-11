@@ -22,3 +22,13 @@ output "role_name" {
   description = "Name of the host's IAM role."
   value       = aws_iam_role.this.name
 }
+
+output "alb_url" {
+  description = "Jenkins URL through the ALB, or null when the ALB is disabled."
+  value       = var.enable_public_alb ? "http://${aws_lb.jenkins[0].dns_name}" : null
+}
+
+output "alb_security_group_id" {
+  description = "Security group of the Jenkins ALB. Add the client IP here to open access."
+  value       = var.enable_public_alb ? aws_security_group.alb[0].id : null
+}

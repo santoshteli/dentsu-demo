@@ -27,4 +27,8 @@ module "jenkins_host" {
   kubectl_version   = var.kubectl_version
   helm_version      = var.helm_version
   terraform_version = var.terraform_version
+
+  enable_public_alb = var.enable_jenkins_alb
+  public_subnet_ids = module.vpc.public_subnet_ids
+  alb_allowed_cidrs = var.jenkins_alb_allowed_cidrs
 }

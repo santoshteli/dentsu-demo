@@ -59,6 +59,9 @@ Later stacks read earlier ones with `terraform_remote_state` from the same S3 bu
 - Tags: provider `default_tags` in each stack sets `Name` (fallback `dentsu-demo`), `Env = dentsu-demo`,
   `Project`, `ManagedBy` and `Stack`. Every taggable resource also sets its own `Name`,
   which overrides the fallback.
+- Demo docs live outside the public repo in `../dentsu-demo-notes/` (sources in `src/*.md`,
+  built to .docx with `md2docx.py`; see its README). **At the end of every phase, update
+  `src/Dentsu Demo Runbook.md` with that phase's demo steps and rebuild the .docx.**
 - Working rules: one phase per session, and plan before code. Claude may run
   `terraform fmt` and `validate`. **The user runs every `plan` and `apply`.** After
   each module, explain every resource and why it is needed.
@@ -73,7 +76,7 @@ terraform plan -out tfplan && terraform apply tfplan
 $(terraform output -raw ssm_shell_command)                 # shell on the host
 $(terraform output -raw ssm_jenkins_port_forward_command)  # Jenkins on localhost:8080
 
-# 02-eks and 03-addons (on the Jenkins host as ec2-user, after cloning). 03 is not written yet.
+# 02-eks and 03-addons (on the Jenkins host as ec2-user, after cloning)
 cd terraform/stacks/02-eks      # then 03-addons
 terraform init -backend-config=backend.hcl
 terraform plan -out tfplan && terraform apply tfplan

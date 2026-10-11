@@ -48,6 +48,16 @@ output "jenkins_role_arn" {
   value       = module.jenkins_host.role_arn
 }
 
+output "jenkins_url" {
+  description = "Jenkins through the ALB. Reachable only after an inbound rule for your IP is added to jenkins_alb_security_group_id."
+  value       = module.jenkins_host.alb_url
+}
+
+output "jenkins_alb_security_group_id" {
+  description = "Security group to edit (HTTP, Source: My IP) to open Jenkins for the current client."
+  value       = module.jenkins_host.alb_security_group_id
+}
+
 output "ssm_shell_command" {
   description = "Open a shell on the Jenkins host."
   value       = "aws ssm start-session --region ${var.region} --target ${module.jenkins_host.instance_id}"

@@ -56,6 +56,18 @@ variable "jenkins_instance_type" {
   default     = "t3.medium"
 }
 
+variable "enable_jenkins_alb" {
+  description = "Put an internet-facing ALB in front of Jenkins for browser-only access. Costs about $0.03/hr while it exists."
+  type        = bool
+  default     = true
+}
+
+variable "jenkins_alb_allowed_cidrs" {
+  description = "Client CIDRs allowed through the Jenkins ALB. Keep empty in git; add your IP in the console (Source: My IP) when needed."
+  type        = list(string)
+  default     = []
+}
+
 variable "kubectl_version" {
   description = "kubectl version for the Jenkins host. Keep within one minor version of the cluster."
   type        = string
