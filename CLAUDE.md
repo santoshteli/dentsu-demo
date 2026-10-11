@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Interview assignment (Dentsu, DevOps Lead, round 2). Current status, decisions and next
-steps are in [docs/PROGRESS.md](docs/PROGRESS.md). Read it first.
+steps are in `../dentsu-demo-notes/PROGRESS.md` (kept outside this public repo). Read it first.
 
 ## Goal
 
@@ -27,7 +27,6 @@ terraform/modules/   vpc, ecr, jenkins-host, eks, nodegroup, alb-controller
 terraform/stacks/    01-base, 02-eks, 03-addons   (root configs)
 Jenkinsfile.infra    infra pipeline: plan/apply/destroy of 02-eks and 03-addons, with approval
 README.md            user-facing deploy/validate/teardown guide
-docs/PROGRESS.md     status log for working sessions
 ```
 
 ## Three-stack design
