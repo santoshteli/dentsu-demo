@@ -26,6 +26,7 @@ Platform and application are separate on purpose: they change at different rates
 | CI/CD pipeline: Git, npm, Docker, ECR, kubectl | `Jenkinsfile` in dentsu-demo-app |
 | Kubernetes manifests: deployment, service, ingress (ALB) | `k8s/` in dentsu-demo-app |
 | README: prerequisites, deployment, validation | This file |
+| Runbook: browser-only steps to create, verify and tear down | [docs/RUNBOOK.md](docs/RUNBOOK.md) |
 
 ## Architecture
 
@@ -82,6 +83,7 @@ terraform/
     02-eks/          applied from the Jenkins host
     03-addons/       applied from the Jenkins host
 Jenkinsfile.infra    plan, approve, apply or destroy for 02-eks and 03-addons
+docs/RUNBOOK.md      step-by-step: create, verify and tear down from a browser
 CLAUDE.md            project conventions (region, naming, pinned versions)
 ```
 
@@ -188,6 +190,8 @@ terraform apply tfplan
 7. Prints the application URL.
 
 After that, every `git push` to the application repository is deployed automatically: Jenkins polls every 2 minutes, because a GitHub webhook cannot reach a private Jenkins. See the [application README](https://github.com/santoshteli/dentsu-demo-app#readme) for details.
+
+For the day-to-day sequence (create the cluster, deploy, change code, tear down) as short browser-only steps, see the **[runbook](docs/RUNBOOK.md)**.
 
 ## Validation
 

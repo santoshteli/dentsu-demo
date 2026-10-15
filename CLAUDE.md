@@ -61,9 +61,10 @@ Later stacks read earlier ones with `terraform_remote_state` from the same S3 bu
 - Tags: provider `default_tags` in each stack sets `Name` (fallback `dentsu-demo`), `Env = dentsu-demo`,
   `Project`, `ManagedBy` and `Stack`. Every taggable resource also sets its own `Name`,
   which overrides the fallback.
-- Demo docs live outside the public repo in `../dentsu-demo-notes/` (sources in `src/*.md`,
-  built to .docx with `md2docx.py`; see its README). **At the end of every phase, update
-  `src/Dentsu Demo Runbook.md` with that phase's demo steps and rebuild the .docx.**
+- The demo runbook is **`docs/RUNBOOK.md`** in this repo (short browser-only steps, no
+  account IDs, addresses or instance IDs; use console paths or `terraform output`).
+  **Update it whenever a step changes.** Private notes (walkthroughs, PROGRESS.md, real
+  values) stay outside the public repo in `../dentsu-demo-notes/`.
 - Working rules: one phase per session, and plan before code. Claude may run
   `terraform fmt` and `validate`. **The user runs every `plan` and `apply`.** After
   each module, explain every resource and why it is needed.
